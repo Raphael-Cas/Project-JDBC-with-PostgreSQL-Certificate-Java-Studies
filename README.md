@@ -2,26 +2,41 @@
 
 # JDBC Library
 
-A study project for **plain JDBC** in Java, connecting to a **PostgreSQL** library database (books, users and loans). No Maven, no frameworks and no ORM: just `DriverManager`, `Statement` and `ResultSet`.
+A small console application that manages a library catalog using **plain JDBC** and **PostgreSQL**. No Maven, no Spring Boot, no Hibernate/JPA: just the JDK and the PostgreSQL JDBC driver.
 
-## What this project demonstrates
+## Features
 
-- Opening a connection with `DriverManager.getConnection(...)`
-- Running a simple `SELECT` on the `livro` (book) table
-- Reading a `ResultSet` row by row
-- Manually creating `Livro` objects, filling them field by field
-- Using `try-with-resources` to close the connection automatically
+Menu-driven CRUD for books (`livro`):
+
+- Register a book
+- List all books
+- Find a book by ID
+- Update a book (press Enter to keep the current value of a field)
+- Delete a book
+- Exit
 
 ## Project structure
 
-A simple project with all files in the root folder (no `src` folder):
+```
+biblioteca
+│
+├── Main.java                         # console menu (Scanner); never touches the database
+├── biblioteca.sql                    # tables and sample data
+├── connection
+│   └── ConnectionFactory.java        # opens connections: ConnectionFactory.getConnection()
+├── entity
+│   ├── Livro.java
+│   ├── Usuario.java
+│   └── Emprestimo.java
+└── repository
+    └── LivroRepository.java          # all SQL for the "livro" table (PreparedStatement)
+```
+
+How the layers talk to each other:
 
 ```
-.
-├── Main.java        # connection, SELECT and printing the books
-├── Livro.java       # model class (id, titulo, autor, anoPublicacao, disponivel)
-├── biblioteca.sql   # table creation and sample data
-└── README.md
+Main  ->  LivroRepository  ->  ConnectionFactory  ->  PostgreSQL
+(menu)    (SQL / CRUD)         (opens connections)
 ```
 
 ## Data model
@@ -32,16 +47,16 @@ A simple project with all files in the root folder (no `src` folder):
 | `usuario`    | `id` (PK), `nome`, `email` (unique)                                                                           |
 | `emprestimo` | `id` (PK), `livro_id` (FK), `usuario_id` (FK), `data_emprestimo`, `data_prevista_devolucao`, `data_devolucao` |
 
-`data_devolucao` is `NULL` while the book has not been returned.
+A book that is referenced by a loan cannot be deleted (foreign key). The application shows a friendly message in that case.
 
 ## Prerequisites
 
 - [JDK](https://adoptium.net/) 11 or higher
 - [PostgreSQL](https://www.postgresql.org/download/) running on `localhost:5432`
-- [pgAdmin 4](https://www.pgadmin.org/) (optional, to run the script visually)
-- [PostgreSQL JDBC driver](https://jdbc.postgresql.org/download/) (`.jar` file), placed in the same folder as the `.java` files
+- [pgAdmin 4](https://www.pgadmin.org/) (optional)
+- [PostgreSQL JDBC driver](https://jdbc.postgresql.org/download/) (`.jar`), placed in the project root folder
 
-## How to run
+## Setup
 
 ### 1. Create the database and tables
 
@@ -56,48 +71,78 @@ psql -U postgres -d biblioteca -f biblioteca.sql
 
 ### 2. Configure the connection
 
-In `Main.java`, adjust the constants to match your environment:
+`ConnectionFactory` reads three environment variables and falls back to defaults:
 
-```java
-static final String URL = "jdbc:postgresql://localhost:5432/biblioteca";
-static final String USER = "postgres";
-static final String PASSWORD = "your_password";
+| Variable      | Default                                       |
+|---------------|-----------------------------------------------|
+| `DB_URL`      | `jdbc:postgresql://localhost:5432/biblioteca` |
+| `DB_USER`     | `postgres`                                    |
+| `DB_PASSWORD` | `your_password`                               |
+
+Set your password in the terminal before running (it lasts until you close that terminal):
+
+```bash
+# Windows PowerShell
+$env:DB_PASSWORD="your_real_password"
+
+# Windows cmd
+set DB_PASSWORD=your_real_password
+
+# Linux / macOS
+export DB_PASSWORD=your_real_password
 ```
 
-> **Note:** never commit your real password. The repository keeps the `your_password` placeholder.
+This keeps your real password out of the source code and out of Git. Never commit it.
 
 ### 3. Compile and run
-
-The `*` in the classpath includes every `.jar` in the folder (including the driver).
 
 Windows:
 
 ```bash
-javac -cp ".;*" *.java
-java -cp ".;*" Main
+javac -d out -cp "*" -sourcepath . Main.java
+java -cp "out;*" Main
 ```
 
 Linux/macOS:
 
 ```bash
-javac -cp ".:*" *.java
-java -cp ".:*" Main
+javac -d out -cp "*" -sourcepath . Main.java
+java -cp "out:*" Main
 ```
 
-## Expected output
+The `*` in the classpath includes every `.jar` in the folder (the driver), and `-d out` keeps the compiled `.class` files in a separate folder.
+
+If accented characters look wrong in the Windows terminal, run `chcp 65001` before starting the application.
+
+## Example
 
 ```
-Connection opened successfully!
+===== LIBRARY =====
+1 - Register book
+2 - List books
+3 - Find book by ID
+4 - Update book
+5 - Delete book
+0 - Exit
+Choose an option: 2
 
-Books found: 6
-Livro{id=1, titulo='Dom Casmurro', autor='Machado de Assis', anoPublicacao=1899, disponivel=true}
+--- Books ---
+#1 | Dom Casmurro | Machado de Assis | 1899 | available
+#2 | Memórias Póstumas de Brás Cubas | Machado de Assis | 1881 | on loan
 ...
 ```
 
+## Good practices used
+
+- **Separation of concerns:** menu, data access and connection logic live in different classes.
+- **`PreparedStatement` everywhere:** all queries use parameters, which prevents SQL injection.
+- **`try-with-resources`:** connections, statements and result sets are always closed.
+- **No secrets in code:** credentials come from environment variables.
+- **`Optional` for lookups:** `findById` makes the "not found" case explicit.
+
 ## Next steps
 
-- List users and loans
-- Use `PreparedStatement` with parameters
-- Implement `INSERT`, `UPDATE` and `DELETE`
-- Write `JOIN` queries across `emprestimo`, `livro` and `usuario`
-- Move data access into DAO classes
+- `UsuarioRepository` and `EmprestimoRepository`
+- Menu options to register and return loans (updating `livro.disponivel`)
+- `JOIN` queries to list loans with book title and user name
+- Transactions for operations that touch more than one table
