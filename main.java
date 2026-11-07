@@ -1,54 +1,265 @@
+import entity.Livro;
+import repository.LivroRepository;
 
-import java.sql.Connection;
-import java.sql.DriverManager;
-import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Statement;
-import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
+import java.util.Scanner;
 
+/**
+ * Entry point of the application. It only shows the menu, reads the user's input
+ * and calls the repository. It never talks to the database directly.
+ */
 public class Main {
 
-    // Dados de conexão (altere usuário e senha conforme o seu PostgreSQL)
-    static final String URL = "jdbc:postgresql://localhost:5432/biblioteca";
-    static final String USUARIO = "yours";
-    static final String SENHA = "yours";
+    private final Scanner scanner;
+    private final LivroRepository repository = new LivroRepository();
+
+    public Main(Scanner scanner) {
+        this.scanner = scanner;
+    }
 
     public static void main(String[] args) {
+        // The Scanner is closed automatically when the program ends.
+        try (Scanner scanner = new Scanner(System.in)) {
+            new Main(scanner).run();
+        }
+    }
 
-        String sql = "SELECT id, titulo, autor, ano_publicacao, disponivel FROM livro ORDER BY id";
+    // ------------------------------------------------------------------
+    // Menu loop
+    // ------------------------------------------------------------------
 
-        List<Livro> livros = new ArrayList<>();
+    private void run() {
+        boolean running = true;
 
-        // try-with-resources fecha Connection, Statement e ResultSet automaticamente
-        try (Connection conexao = DriverManager.getConnection(URL, USUARIO, SENHA);
-             Statement statement = conexao.createStatement();
-             ResultSet rs = statement.executeQuery(sql)) {
+        while (running) {
+            printMenu();
+            int option = readInt("Choose an option: ");
 
-            System.out.println("Conexão aberta com sucesso!\n");
-
-            // Percorre cada linha do resultado
-            while (rs.next()) {
-                // Criação manual do objeto, preenchendo campo por campo
-                Livro livro = new Livro();
-                livro.setId(rs.getInt("id"));
-                livro.setTitulo(rs.getString("titulo"));
-                livro.setAutor(rs.getString("autor"));
-                livro.setAnoPublicacao(rs.getInt("ano_publicacao"));
-                livro.setDisponivel(rs.getBoolean("disponivel"));
-
-                livros.add(livro);
+            try {
+                switch (option) {
+                    case 1:
+                        registerLivro();
+                        break;
+                    case 2:
+                        listLivros();
+                        break;
+                    case 3:
+                        findLivroById();
+                        break;
+                    case 4:
+                        updateLivro();
+                        break;
+                    case 5:
+                        deleteLivro();
+                        break;
+                    case 0:
+                        running = false;
+                        System.out.println("Goodbye!");
+                        break;
+                    default:
+                        System.out.println("Invalid option. Choose a number from the menu.");
+                }
+            } catch (SQLException e) {
+                printDatabaseError(e);
             }
+        }
+    }
 
-        } catch (SQLException e) {
-            System.err.println("Erro ao acessar o banco de dados: " + e.getMessage());
+    private void printMenu() {
+        System.out.println();
+        System.out.println("===== LIBRARY =====");
+        System.out.println("1 - Register book");
+        System.out.println("2 - List books");
+        System.out.println("3 - Find book by ID");
+        System.out.println("4 - Update book");
+        System.out.println("5 - Delete book");
+        System.out.println("0 - Exit");
+    }
+
+    // ------------------------------------------------------------------
+    // Menu actions
+    // ------------------------------------------------------------------
+
+    private void registerLivro() throws SQLException {
+        System.out.println("\n--- Register book ---");
+        String titulo = readRequired("Title: ");
+        String autor = readRequired("Author: ");
+        int ano = readPositiveInt("Publication year: ");
+        boolean disponivel = readYesNo("Available? (y/n): ");
+
+        Livro livro = new Livro(titulo, autor, ano, disponivel);
+        repository.insert(livro);
+
+        System.out.println("Book registered with id " + livro.getId() + ".");
+    }
+
+    private void listLivros() throws SQLException {
+        System.out.println("\n--- Books ---");
+        List<Livro> livros = repository.findAll();
+
+        if (livros.isEmpty()) {
+            System.out.println("No books registered.");
+            return;
+        }
+        for (Livro livro : livros) {
+            printLivro(livro);
+        }
+    }
+
+    private void findLivroById() throws SQLException {
+        System.out.println("\n--- Find book by ID ---");
+        int id = readInt("Book id: ");
+
+        Optional<Livro> livro = repository.findById(id);
+        if (livro.isPresent()) {
+            printLivro(livro.get());
+        } else {
+            System.out.println("No book found with id " + id + ".");
+        }
+    }
+
+    private void updateLivro() throws SQLException {
+        System.out.println("\n--- Update book ---");
+        int id = readInt("Book id: ");
+
+        Optional<Livro> found = repository.findById(id);
+        if (found.isEmpty()) {
+            System.out.println("No book found with id " + id + ".");
             return;
         }
 
-        // Impressão dos objetos encontrados
-        System.out.println("Livros encontrados: " + livros.size());
-        for (Livro livro : livros) {
-            System.out.println(livro);
+        Livro livro = found.get();
+        System.out.println("Current data:");
+        printLivro(livro);
+        System.out.println("Press Enter to keep the current value.");
+
+        String titulo = readLine("Title [" + livro.getTitulo() + "]: ");
+        if (!titulo.isEmpty()) {
+            livro.setTitulo(titulo);
+        }
+
+        String autor = readLine("Author [" + livro.getAutor() + "]: ");
+        if (!autor.isEmpty()) {
+            livro.setAutor(autor);
+        }
+
+        String ano = readLine("Publication year [" + livro.getAnoPublicacao() + "]: ");
+        if (!ano.isEmpty()) {
+            try {
+                int novoAno = Integer.parseInt(ano);
+                if (novoAno > 0) {
+                    livro.setAnoPublicacao(novoAno);
+                } else {
+                    System.out.println("Year must be positive. Keeping the current value.");
+                }
+            } catch (NumberFormatException e) {
+                System.out.println("Invalid year. Keeping the current value.");
+            }
+        }
+
+        String disponivel = readLine("Available (y/n) [" + (livro.isDisponivel() ? "y" : "n") + "]: ");
+        if (disponivel.equalsIgnoreCase("y")) {
+            livro.setDisponivel(true);
+        } else if (disponivel.equalsIgnoreCase("n")) {
+            livro.setDisponivel(false);
+        } else if (!disponivel.isEmpty()) {
+            System.out.println("Invalid answer. Keeping the current value.");
+        }
+
+        if (repository.update(livro)) {
+            System.out.println("Book updated successfully.");
+        } else {
+            System.out.println("No book found with id " + id + ". Nothing was updated.");
+        }
+    }
+
+    private void deleteLivro() throws SQLException {
+        System.out.println("\n--- Delete book ---");
+        int id = readInt("Book id: ");
+
+        if (repository.delete(id)) {
+            System.out.println("Book removed successfully.");
+        } else {
+            System.out.println("No book found with id " + id + ". Nothing was removed.");
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Output helpers
+    // ------------------------------------------------------------------
+
+    private void printLivro(Livro livro) {
+        System.out.println("#" + livro.getId()
+                + " | " + livro.getTitulo()
+                + " | " + livro.getAutor()
+                + " | " + livro.getAnoPublicacao()
+                + " | " + (livro.isDisponivel() ? "available" : "on loan"));
+    }
+
+    private void printDatabaseError(SQLException e) {
+        // SQLState 23503 = foreign key violation (the book still has loans).
+        if ("23503".equals(e.getSQLState())) {
+            System.out.println("Operation refused: this book is referenced by existing loans.");
+        } else {
+            System.out.println("Database error: " + e.getMessage());
+            System.out.println("SQLState: " + e.getSQLState());
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Input helpers (always read whole lines to avoid Scanner newline problems)
+    // ------------------------------------------------------------------
+
+    private String readLine(String prompt) {
+        System.out.print(prompt);
+        return scanner.nextLine().trim();
+    }
+
+    // Keeps asking until the user types something that is not empty.
+    private String readRequired(String prompt) {
+        String value = readLine(prompt);
+        while (value.isEmpty()) {
+            System.out.println("This field is required.");
+            value = readLine(prompt);
+        }
+        return value;
+    }
+
+    // Keeps asking until the user types a valid integer.
+    private int readInt(String prompt) {
+        while (true) {
+            String value = readLine(prompt);
+            try {
+                return Integer.parseInt(value);
+            } catch (NumberFormatException e) {
+                System.out.println("Please type a valid number.");
+            }
+        }
+    }
+
+    // Keeps asking until the user types an integer greater than zero.
+    private int readPositiveInt(String prompt) {
+        int value = readInt(prompt);
+        while (value <= 0) {
+            System.out.println("The value must be greater than zero.");
+            value = readInt(prompt);
+        }
+        return value;
+    }
+
+    // Keeps asking until the user types y or n.
+    private boolean readYesNo(String prompt) {
+        while (true) {
+            String value = readLine(prompt);
+            if (value.equalsIgnoreCase("y")) {
+                return true;
+            }
+            if (value.equalsIgnoreCase("n")) {
+                return false;
+            }
+            System.out.println("Please type y or n.");
         }
     }
 }
